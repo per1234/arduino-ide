@@ -15,6 +15,11 @@ on:
     tags:
       - '[0-9]+.[0-9]+.[0-9]+*'
   workflow_dispatch:
+    inputs:
+      build-for-apple-silicon:
+        description: Build for Apple Silicon
+        type: boolean
+        default: false
   pull_request:
     paths-ignore:
       - '.github/**'
@@ -32,30 +37,219 @@ env:
   GO_VERSION: "1.17"
   JOB_TRANSFER_ARTIFACT: build-artifacts
   CHANGELOG_ARTIFACTS: changelog
+  SELF_HOSTED_RUNNER_AWS_PURPOSE_TAG_KEY: purpose
+  SELF_HOSTED_RUNNER_AWS_PURPOSE_TAG_VALUE: GitHub Actions runner
+  SELF_HOSTED_RUNNER_HOST_AVAILABILITY_ZONE: us-east-2b
+  SELF_HOSTED_RUNNER_INSTANCE_REGION: us-east-2
+  # certificate-secret: Name of the secret that contains the certificate.
+  # certificate-password-secret: Name of the secret that contains the certificate password.
+  # certificate-extension: File extension for the certificate.
+  # APPLE_SIGNING_CERTIFICATE_P12 secret was produced by following the procedure from:
+  # https://www.kencochrane.com/2020/08/01/build-and-sign-golang-binaries-for-macos-with-github-actions/#exporting-the-developer-certificate
+  BASE_BUILD_MATRIX: |
+    [
+      {
+        "name": "Windows",
+        "runs-on": "windows-2019",
+        "certificate-secret": "WINDOWS_SIGNING_CERTIFICATE_PFX",
+        "certificate-password-secret": "WINDOWS_SIGNING_CERTIFICATE_PASSWORD",
+        "certificate-extension": "pfx"
+      },
+      {
+        "name": "Linux",
+        "runs-on": "ubuntu-18.04"
+      },
+      {
+        "name": "macOS x86",
+        "runs-on": "macos-latest",
+        "certificate-secret": "APPLE_SIGNING_CERTIFICATE_P12",
+        "certificate-password-secret": "KEYCHAIN_PASSWORD",
+        "certificate-extension": "p12"
+      }
+    ]
+  SELF_HOSTED_MATRIX: |
+    [
+      {
+        "name": "macOS ARM",
+        "runs-on": [
+          "self-hosted",
+          "ec2",
+          "mac2",
+          "arduino_arduino-ide"
+        ],
+        "certificate-secret": "APPLE_SIGNING_CERTIFICATE_P12",
+        "certificate-password-secret": "KEYCHAIN_PASSWORD",
+        "certificate-extension": "p12"
+      }
+    ]
 
 jobs:
+  select-targets:
+    runs-on: ubuntu-latest
+    outputs:
+      build-matrix: ${{ steps.generate-build-matrix.outputs.matrix }}
+      use-self-hosted-runner: ${{ steps.self-hosted-runner-determination.outputs.use }}
+    steps:
+      - name: Determine whether to run build on self-hosted runner
+        id: self-hosted-runner-determination
+        run: |
+          # Only run the build on self-hosted runner on release or select manually triggered runs.
+          if [[
+            "${{ secrets.AWS_SECRET_ACCESS_KEY }}" != "" && (
+              "${{ startsWith(github.ref, 'refs/tags/') }}" == "true" ||
+              (
+                "${{ github.event_name }}" == "workflow_dispatch" &&
+                "${{ github.event.inputs.build-for-apple-silicon }}" == "true"
+              )
+            )
+          ]]; then
+            echo "use=true" >> $GITHUB_OUTPUT
+          else
+            echo "use=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate build matrix
+        id: generate-build-matrix
+        run: |
+          if [[ "${{ steps.self-hosted-runner-determination.outputs.use }}" == "true" ]]; then
+            # Use -c to avoid the need to deal with multi-line content in workflow step output
+            matrix="$(echo '{"base": ${{ env.BASE_BUILD_MATRIX }}, "self_hosted": ${{ env.SELF_HOSTED_MATRIX }}}' | jq -c '.base + .self_hosted')"
+          else
+            matrix="$(echo '${{ env.BASE_BUILD_MATRIX }}' | jq -c '.')"
+          fi
+
+          echo "matrix=$matrix" >> $GITHUB_OUTPUT
+
+  allocate-self-hosted-runner-host:
+    needs: select-targets
+    runs-on: ubuntu-latest
+    outputs:
+      host-id: ${{ steps.allocate-host.outputs.id }}
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    steps:
+      - name: Check for existing host
+        if: needs.select-targets.outputs.use-self-hosted-runner == 'true'
+        id: host-available
+        run: |
+          # See: https://awscli.amazonaws.com/v2/documentation/api/latest/reference/ec2/describe-hosts.html
+          hosts="$(
+            aws ec2 describe-hosts \
+              --filter \
+                Name="instance-type",Values="mac2.metal" \
+                Name="state",Values="available" \
+                Name="tag:${{ env.SELF_HOSTED_RUNNER_AWS_PURPOSE_TAG_KEY }}",Values="${{ env.SELF_HOSTED_RUNNER_AWS_PURPOSE_TAG_VALUE }}" \
+              --output "text" \
+              --query 'Hosts[?AvailableCapacity.AvailableInstanceCapacity[0].AvailableCapacity<`0`].HostId' \
+              --region "${{ env.SELF_HOSTED_RUNNER_INSTANCE_REGION }}"
+          )"
+
+          if [[ "$hosts" == "" ]]; then
+            echo "available=false" >> $GITHUB_OUTPUT
+          else
+            echo "available=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Allocate host
+        if: >
+          needs.select-targets.outputs.use-self-hosted-runner == 'true' &&
+          steps.host-available.outputs.available == 'false'
+        run: |
+          # See: https://awscli.amazonaws.com/v2/documentation/api/latest/reference/ec2/allocate-hosts.html
+          aws ec2 allocate-hosts  \
+            --auto-placement "on" \
+            --availability-zone "${{ env.SELF_HOSTED_RUNNER_HOST_AVAILABILITY_ZONE }}"  \
+            --instance-type "mac2.metal"  \
+            --output "text" \
+            --quantity 1  \
+            --region "${{ env.SELF_HOSTED_RUNNER_INSTANCE_REGION }}"  \
+            --tag-specifications \
+              'ResourceType="dedicated-host",Tags=[{Key=Name,Value=mac2-github-actions-runner-arduino_arduino-ide},{Key=${{ env.SELF_HOSTED_RUNNER_AWS_PURPOSE_TAG_KEY }},Value=${{ env.SELF_HOSTED_RUNNER_AWS_PURPOSE_TAG_VALUE }}}]'
+
+  start-self-hosted-runner:
+    needs:
+      - select-targets
+      - allocate-self-hosted-runner-host
+    runs-on: ubuntu-latest
+    outputs:
+      instance-id: ${{ steps.get-instance-id.outputs.id }}
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    steps:
+      - name: Get instance ID
+        if: needs.select-targets.outputs.use-self-hosted-runner == 'true'
+        id: get-instance-id
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          # See: https://awscli.amazonaws.com/v2/documentation/api/latest/reference/ec2/describe-instances.html
+          id="$(
+            aws ec2 describe-instances \
+              --filters \
+                Name="instance-type",Values="mac2.metal" \
+                Name="tag:${{ env.SELF_HOSTED_RUNNER_AWS_PURPOSE_TAG_KEY }}",Values="${{ env.SELF_HOSTED_RUNNER_AWS_PURPOSE_TAG_VALUE }}" \
+                Name="tag:project",Values="arduino/arduino-ide" \
+              --output "text" \
+              --query "Reservations[0].Instances[0].InstanceId" \
+              --region "${{ env.SELF_HOSTED_RUNNER_INSTANCE_REGION }}"
+          )"
+
+          if [[ "$id" == "None" ]]; then
+            echo "::error::Instance not found."
+            exit 1
+          fi
+
+          echo "id=$id" >> $GITHUB_OUTPUT
+
+      - name: Start instance
+        if: needs.select-targets.outputs.use-self-hosted-runner == 'true'
+        id: start-instance
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          # See: https://awscli.amazonaws.com/v2/documentation/api/latest/reference/ec2/start-instances.html
+          aws ec2 start-instances \
+            --instance-ids "${{ steps.get-instance-id.outputs.id }}"  \
+            --output "text" \
+            --region "${{ env.SELF_HOSTED_RUNNER_INSTANCE_REGION }}"
+
+          echo "Instance started."
+          echo "It may take up to 40 minutes for the runner to be ready."
+          echo "During that time, the build job will remain in a \"Waiting for a runner to pick up this job...\" state."
+
   build:
-    name: build (${{ matrix.config.os }})
+    name: build (${{ matrix.config.name }})
+    needs:
+      - select-targets
+      - start-self-hosted-runner
     strategy:
+      fail-fast: false
       matrix:
-        config:
-          - os: windows-2019
-            certificate-secret: WINDOWS_SIGNING_CERTIFICATE_PFX # Name of the secret that contains the certificate.
-            certificate-password-secret: WINDOWS_SIGNING_CERTIFICATE_PASSWORD # Name of the secret that contains the certificate password.
-            certificate-extension: pfx  # File extension for the certificate.
-          - os: ubuntu-18.04 # https://github.com/arduino/arduino-ide/issues/259
-          - os: macos-latest
-            # APPLE_SIGNING_CERTIFICATE_P12 secret was produced by following the procedure from:
-            # https://www.kencochrane.com/2020/08/01/build-and-sign-golang-binaries-for-macos-with-github-actions/#exporting-the-developer-certificate
-            certificate-secret: APPLE_SIGNING_CERTIFICATE_P12
-            certificate-password-secret: KEYCHAIN_PASSWORD
-            certificate-extension: p12
-    runs-on: ${{ matrix.config.os }}
+        config: ${{ fromJson(needs.select-targets.outputs.build-matrix) }}
+    runs-on: ${{ matrix.config.runs-on }}
     timeout-minutes: 90
 
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+
+      - name: Set up Apple Silicon macOS self-hosted runner
+        if: >
+          runner.os == 'macOS' &&
+          runner.arch == 'ARM64' &&
+          contains(matrix.config.runs-on, 'self-hosted')
+        run: |
+          # Rosetta 2 is required to run tools used during the build process that were built for x86 architecture.
+          softwareupdate --agree-to-license --install-rosetta
+
+          # See: https://github.com/actions/setup-python/blob/main/docs/advanced-usage.md#macos
+          python_installation_folder="/Users/runner/hostedtoolcache"
+          sudo mkdir -p "$python_installation_folder"
+          sudo chown "$USER" "$python_installation_folder"
 
       - name: Install Node.js 16.x
         uses: actions/setup-node@v3
@@ -63,9 +257,19 @@ jobs:
           node-version: '16.x'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Install Yarn
+        shell: bash
+        run: |
+          npm install --global "yarn@<2.x"
+
       - name: Install Python 3.x
         uses: actions/setup-python@v4
         with:
+          # This is required for the Apple Silicon runner because the action does not provide Python for arm64
+          # architecture. Python >=3.11 for macOS is universal2 binary so the x64 architecture Python works for Apple
+          # Silicon runner as well:
+          # https://github.com/actions/python-versions#user-content-building-installation-packages
+          architecture: x64
           python-version: '3.x'
 
       - name: Install Go
@@ -114,6 +318,28 @@ jobs:
           name: ${{ env.JOB_TRANSFER_ARTIFACT }}
           path: electron/build/dist/build-artifacts/
 
+  stop-self-hosted-runner:
+    needs:
+      - select-targets
+      - start-self-hosted-runner
+      - build
+    # The job must run any time the self-hosted runner instance was started.
+    if: >
+      always() &&
+      needs.select-targets.outputs.use-self-hosted-runner == 'true' &&
+      needs.start-self-hosted-runner.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Stop self-hosted runner instance
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          # See: https://awscli.amazonaws.com/v2/documentation/api/latest/reference/ec2/stop-instances.html
+          aws ec2 stop-instances \
+            --instance-ids "${{ needs.start-self-hosted-runner.outputs.instance-id }}" \
+            --region "${{ env.SELF_HOSTED_RUNNER_INSTANCE_REGION }}"
+
   artifacts:
     name: ${{ matrix.artifact.name }} artifact
     needs: build
@@ -128,9 +354,13 @@ jobs:
           - path: '*Linux_64bit.AppImage'
             name: Linux_X86-64_app_image
           - path: '*macOS_64bit.dmg'
-            name: macOS_dmg
+            name: macOS_X86-64_dmg
           - path: '*macOS_64bit.zip'
-            name: macOS_zip
+            name: macOS_X86-64.zip
+          - path: '*macOS_ARM64.dmg'
+            name: macOS_ARM64_dmg
+          - path: '*macOS_ARM64.zip'
+            name: macOS_ARM64_zip
           - path: '*Windows_64bit.exe'
             name: Windows_X86-64_interactive_installer
           - path: '*Windows_64bit.msi'

@@ -1,0 +1,86 @@
+name: Release Self-Hosted Runner Host
+
+env:
+  SELF_HOSTED_RUNNER_INSTANCE_REGION: us-east-2
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/release-runner-host.yml
+  push:
+    paths:
+      - .github/workflows/release-runner-host.yml
+  repository_dispatch:
+  schedule:
+    # Run workflow every 15 minutes.
+    # Note: GitHub Actions periodically has outages which result in workflow run failures.
+    # In this event, the runs will start passing again once the service recovers.
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  run-determination:
+    runs-on: ubuntu-latest
+    outputs:
+      result: ${{ steps.determination.outputs.result }}
+    steps:
+      - name: Determine if the rest of the workflow should run
+        id: determination
+        run: |
+          # The `secrets` context is not available in the `jobs.<job_id>.if` key, so it's necessary to use Bash instead.
+          if [[ "${{ secrets.AWS_ACCESS_KEY_ID }}" == "" ]]; then
+            # Don't run when workflow lacks access to AWS credential secrets (PRs from forks).
+            echo "result=false" >> $GITHUB_OUTPUT
+          else
+            echo "result=true" >> $GITHUB_OUTPUT
+          fi
+
+  release:
+    needs: run-determination
+    if: needs.run-determination.outputs.result == 'true'
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    steps:
+      - name: Check if host is allocated
+        id: host-allocated
+        run: |
+          # See: https://awscli.amazonaws.com/v2/documentation/api/latest/reference/ec2/describe-hosts.html
+          id="$(
+            aws ec2 describe-hosts \
+              --filter \
+                Name="instance-type",Values="mac2.metal" \
+                Name="state",Values="available" \
+                Name="tag:purpose",Values="GitHub Actions runner" \
+              --output "text" \
+              --query Hosts[0].HostId \
+              --region "${{ env.SELF_HOSTED_RUNNER_INSTANCE_REGION }}"
+          )"
+
+          echo "id=$id" >> $GITHUB_OUTPUT
+
+      - name: Release self-hosted runner host
+        if: steps.host-allocated.outputs.id != 'None'
+        run: |
+          # See: https://awscli.amazonaws.com/v2/documentation/api/latest/reference/ec2/release-hosts.html
+          output="$(
+            aws ec2 release-hosts \
+            --host-ids "${{ steps.host-allocated.outputs.id }}"  \
+            --region "${{ env.SELF_HOSTED_RUNNER_INSTANCE_REGION }}"
+          )"
+
+          # Evaluate and handle result of release attempt.
+          error_code="$(echo "$output" | jq -r '.Unsuccessful[0].Error.Code?')"
+          if [[ "$error_code" == "null" ]]; then
+            echo "Host was released"
+          elif [[ "$error_code" == "Client.HostMinAllocationPeriodUnexpired" ]]; then
+            # This error is expected because there is a minimum 24 hr macOS host allocation period.
+            echo "Too early to release host"
+          else
+            error_message="$(echo "$output" | jq -r '.Unsuccessful[0].Error.Message')"
+            echo "::error::Unexpected error while releasing host: $error_message"
+            exit 1
+          fi
