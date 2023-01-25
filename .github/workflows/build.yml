@@ -15,6 +15,11 @@ on:
     tags:
       - '[0-9]+.[0-9]+.[0-9]+*'
   workflow_dispatch:
+    inputs:
+      build-for-apple-silicon:
+        description: Build for Apple Silicon
+        type: boolean
+        default: false
   pull_request:
     paths-ignore:
       - '.github/**'
@@ -30,42 +35,248 @@ on:
 env:
   # See vars.GO_VERSION field of https://github.com/arduino/arduino-cli/blob/master/DistTasks.yml
   GO_VERSION: "1.19"
+  # See: https://github.com/actions/setup-node/#readme
+  NODE_VERSION: 16.x
+  # See: https://github.com/arduino/arduino-ide/blob/main/docs/development.md
+  YARN_VERSION: <2.x
+  CHANNEL_FILES_ARTIFACT: channel-files
   JOB_TRANSFER_ARTIFACT: build-artifacts
   CHANGELOG_ARTIFACTS: changelog
+  SELF_HOSTED_RUNNER_AWS_PURPOSE_TAG_KEY: purpose
+  SELF_HOSTED_RUNNER_AWS_PURPOSE_TAG_VALUE: GitHub Actions runner
+  SELF_HOSTED_RUNNER_HOST_AVAILABILITY_ZONE: us-east-2b
+  SELF_HOSTED_RUNNER_INSTANCE_REGION: us-east-2
+  # certificate-secret: Name of the secret that contains the certificate.
+  # certificate-password-secret: Name of the secret that contains the certificate password.
+  # certificate-extension: File extension for the certificate.
+  # APPLE_SIGNING_CERTIFICATE_P12 secret was produced by following the procedure from:
+  # https://www.kencochrane.com/2020/08/01/build-and-sign-golang-binaries-for-macos-with-github-actions/#exporting-the-developer-certificate
+  BASE_BUILD_MATRIX: |
+    [
+      {
+        "name": "Windows",
+        "runs-on": "windows-2019",
+        "certificate-secret": "WINDOWS_SIGNING_CERTIFICATE_PFX",
+        "certificate-password-secret": "WINDOWS_SIGNING_CERTIFICATE_PASSWORD",
+        "certificate-extension": "pfx"
+      },
+      {
+        "name": "Linux",
+        "runs-on": "ubuntu-18.04"
+      },
+      {
+        "name": "macOS x86",
+        "runs-on": "macos-latest",
+        "certificate-secret": "APPLE_SIGNING_CERTIFICATE_P12",
+        "certificate-password-secret": "KEYCHAIN_PASSWORD",
+        "certificate-extension": "p12"
+      }
+    ]
+  SELF_HOSTED_MATRIX: |
+    [
+      {
+        "name": "macOS ARM",
+        "runs-on": [
+          "self-hosted",
+          "ec2",
+          "mac2",
+          "arduino_arduino-ide"
+        ],
+        "certificate-secret": "APPLE_SIGNING_CERTIFICATE_P12",
+        "certificate-password-secret": "KEYCHAIN_PASSWORD",
+        "certificate-extension": "p12"
+      }
+    ]
 
 jobs:
+  select-targets:
+    runs-on: ubuntu-latest
+    outputs:
+      build-matrix: ${{ steps.generate-build-matrix.outputs.matrix }}
+      use-self-hosted-runner: ${{ steps.self-hosted-runner-determination.outputs.use }}
+    steps:
+      - name: Determine whether to run build on self-hosted runner
+        id: self-hosted-runner-determination
+        run: |
+          # Only run the build on self-hosted runner on release or select manually triggered runs.
+          if [[
+            "${{ secrets.AWS_SECRET_ACCESS_KEY }}" != "" && (
+              "${{ startsWith(github.ref, 'refs/tags/') }}" == "true" ||
+              (
+                "${{ github.event_name }}" == "workflow_dispatch" &&
+                "${{ github.event.inputs.build-for-apple-silicon }}" == "true"
+              )
+            )
+          ]]; then
+            echo "use=true" >> $GITHUB_OUTPUT
+          else
+            echo "use=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate build matrix
+        id: generate-build-matrix
+        run: |
+          if [[ "${{ steps.self-hosted-runner-determination.outputs.use }}" == "true" ]]; then
+            # Use -c to avoid the need to deal with multi-line content in workflow step output
+            matrix="$(echo '{"base": ${{ env.BASE_BUILD_MATRIX }}, "self_hosted": ${{ env.SELF_HOSTED_MATRIX }}}' | jq -c '.base + .self_hosted')"
+          else
+            matrix="$(echo '${{ env.BASE_BUILD_MATRIX }}' | jq -c '.')"
+          fi
+
+          echo "matrix=$matrix" >> $GITHUB_OUTPUT
+
+  allocate-self-hosted-runner-host:
+    needs: select-targets
+    runs-on: ubuntu-latest
+    outputs:
+      host-id: ${{ steps.allocate-host.outputs.id }}
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    steps:
+      - name: Check for existing host
+        if: needs.select-targets.outputs.use-self-hosted-runner == 'true'
+        id: host-available
+        run: |
+          # See: https://awscli.amazonaws.com/v2/documentation/api/latest/reference/ec2/describe-hosts.html
+          hosts="$(
+            aws ec2 describe-hosts \
+              --filter \
+                Name="instance-type",Values="mac2.metal" \
+                Name="state",Values="available" \
+                Name="tag:${{ env.SELF_HOSTED_RUNNER_AWS_PURPOSE_TAG_KEY }}",Values="${{ env.SELF_HOSTED_RUNNER_AWS_PURPOSE_TAG_VALUE }}" \
+              --output "text" \
+              --region "${{ env.SELF_HOSTED_RUNNER_INSTANCE_REGION }}"
+          )"
+
+          if [[ "$hosts" == "" ]]; then
+            echo "available=false" >> $GITHUB_OUTPUT
+          else
+            echo "available=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Allocate host
+        if: >
+          needs.select-targets.outputs.use-self-hosted-runner == 'true' &&
+          steps.host-available.outputs.available == 'false'
+        run: |
+          # See: https://awscli.amazonaws.com/v2/documentation/api/latest/reference/ec2/allocate-hosts.html
+          aws ec2 allocate-hosts  \
+            --auto-placement "on" \
+            --availability-zone "${{ env.SELF_HOSTED_RUNNER_HOST_AVAILABILITY_ZONE }}"  \
+            --instance-type "mac2.metal"  \
+            --output "text" \
+            --quantity 1  \
+            --region "${{ env.SELF_HOSTED_RUNNER_INSTANCE_REGION }}"  \
+            --tag-specifications \
+              'ResourceType="dedicated-host",Tags=[{Key=Name,Value=mac2-github-actions-runner-arduino_arduino-ide},{Key=${{ env.SELF_HOSTED_RUNNER_AWS_PURPOSE_TAG_KEY }},Value=${{ env.SELF_HOSTED_RUNNER_AWS_PURPOSE_TAG_VALUE }}}]'
+
+  start-self-hosted-runner:
+    needs:
+      - select-targets
+      - allocate-self-hosted-runner-host
+    runs-on: ubuntu-latest
+    outputs:
+      instance-id: ${{ steps.get-instance-id.outputs.id }}
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    steps:
+      - name: Get instance ID
+        if: needs.select-targets.outputs.use-self-hosted-runner == 'true'
+        id: get-instance-id
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          # See: https://awscli.amazonaws.com/v2/documentation/api/latest/reference/ec2/describe-instances.html
+          id="$(
+            aws ec2 describe-instances \
+              --filters \
+                Name="instance-type",Values="mac2.metal" \
+                Name="tag:${{ env.SELF_HOSTED_RUNNER_AWS_PURPOSE_TAG_KEY }}",Values="${{ env.SELF_HOSTED_RUNNER_AWS_PURPOSE_TAG_VALUE }}" \
+                Name="tag:project",Values="arduino/arduino-ide" \
+              --output "text" \
+              --query "Reservations[0].Instances[0].InstanceId" \
+              --region "${{ env.SELF_HOSTED_RUNNER_INSTANCE_REGION }}"
+          )"
+
+          if [[ "$id" == "None" ]]; then
+            echo "::error::Instance not found."
+            exit 1
+          fi
+
+          echo "id=$id" >> $GITHUB_OUTPUT
+
+      - name: Start instance
+        if: needs.select-targets.outputs.use-self-hosted-runner == 'true'
+        id: start-instance
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          # See: https://awscli.amazonaws.com/v2/documentation/api/latest/reference/ec2/start-instances.html
+          aws ec2 start-instances \
+            --instance-ids "${{ steps.get-instance-id.outputs.id }}"  \
+            --output "text" \
+            --region "${{ env.SELF_HOSTED_RUNNER_INSTANCE_REGION }}"
+
+          echo "Instance started."
+          echo "It may take up to 40 minutes for the runner to be ready."
+          echo "During that time, the build job will remain in a \"Waiting for a runner to pick up this job...\" state."
+
   build:
-    name: build (${{ matrix.config.os }})
+    name: build (${{ matrix.config.name }})
+    needs:
+      - select-targets
+      - start-self-hosted-runner
+    env:
+      # Location of artifacts generated by build.
+      ARTIFACTS_PATH: electron/build/dist/build-artifacts
     strategy:
+      fail-fast: false
       matrix:
-        config:
-          - os: windows-2019
-            certificate-secret: WINDOWS_SIGNING_CERTIFICATE_PFX # Name of the secret that contains the certificate.
-            certificate-password-secret: WINDOWS_SIGNING_CERTIFICATE_PASSWORD # Name of the secret that contains the certificate password.
-            certificate-extension: pfx  # File extension for the certificate.
-          - os: ubuntu-18.04 # https://github.com/arduino/arduino-ide/issues/259
-          - os: macos-latest
-            # APPLE_SIGNING_CERTIFICATE_P12 secret was produced by following the procedure from:
-            # https://www.kencochrane.com/2020/08/01/build-and-sign-golang-binaries-for-macos-with-github-actions/#exporting-the-developer-certificate
-            certificate-secret: APPLE_SIGNING_CERTIFICATE_P12
-            certificate-password-secret: KEYCHAIN_PASSWORD
-            certificate-extension: p12
-    runs-on: ${{ matrix.config.os }}
+        config: ${{ fromJson(needs.select-targets.outputs.build-matrix) }}
+    runs-on: ${{ matrix.config.runs-on }}
     timeout-minutes: 90
 
     steps:
       - name: Checkout
         uses: actions/checkout@v3
 
+      - name: Set up Apple Silicon macOS self-hosted runner
+        if: >
+          runner.os == 'macOS' &&
+          runner.arch == 'ARM64' &&
+          contains(matrix.config.runs-on, 'self-hosted')
+        run: |
+          # Rosetta 2 is required to run tools used during the build process that were built for x86 architecture.
+          softwareupdate --agree-to-license --install-rosetta
+
+          # See: https://github.com/actions/setup-python/blob/main/docs/advanced-usage.md#macos
+          python_installation_folder="/Users/runner/hostedtoolcache"
+          sudo mkdir -p "$python_installation_folder"
+          sudo chown "$USER" "$python_installation_folder"
+
       - name: Install Node.js 16.x
         uses: actions/setup-node@v3
         with:
-          node-version: '16.x'
+          node-version: ${{ env.NODE_VERSION }}
           registry-url: 'https://registry.npmjs.org'
+
+      - name: Install Yarn
+        shell: bash
+        run: |
+          npm install --global "yarn@${{ env.YARN_VERSION }}"
 
       - name: Install Python 3.x
         uses: actions/setup-python@v4
         with:
+          # This is required for the Apple Silicon runner because the action does not provide Python for arm64
+          # architecture. Python >=3.11 for macOS is universal2 binary so the x64 architecture Python works for Apple
+          # Silicon runner as well:
+          # https://github.com/actions/python-versions#user-content-building-installation-packages
+          architecture: x64
           python-version: '3.x'
 
       - name: Install Go
@@ -108,11 +319,102 @@ jobs:
           yarn --cwd ./electron/packager/
           yarn --cwd ./electron/packager/ package
 
+      # Both macOS jobs generate a channel file with same path and name. The second job to complete would overwrite the
+      # file generated by the first in the workflow artifact.
+      - name: Stage macOS channel file
+        if: runner.os == 'macOS'
+        run: |
+          mv "${{ env.ARTIFACTS_PATH }}/stable-mac.yml" "${{ env.ARTIFACTS_PATH }}/stable-mac-${{ runner.arch }}.yml"
+
+      - name: Upload channel file artifact
+        uses: actions/upload-artifact@v3
+        with:
+          if-no-files-found: error
+          name: ${{ env.CHANNEL_FILES_ARTIFACT }}
+          path: ${{ env.ARTIFACTS_PATH }}/*.yml
+
+      # Avoid inclusion of staging macOS channel files in job transfer artifact
+      - name: Remove channel file
+        shell: bash
+        run: |
+          rm "${{ env.ARTIFACTS_PATH }}"/*.yml
+
       - name: Upload [GitHub Actions]
         uses: actions/upload-artifact@v3
         with:
           name: ${{ env.JOB_TRANSFER_ARTIFACT }}
-          path: electron/build/dist/build-artifacts/
+          path: ${{ env.ARTIFACTS_PATH }}
+
+  stop-self-hosted-runner:
+    needs:
+      - select-targets
+      - start-self-hosted-runner
+      - build
+    # The job must run any time the self-hosted runner instance was started.
+    if: >
+      always() &&
+      needs.select-targets.outputs.use-self-hosted-runner == 'true' &&
+      needs.start-self-hosted-runner.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Stop self-hosted runner instance
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          # See: https://awscli.amazonaws.com/v2/documentation/api/latest/reference/ec2/stop-instances.html
+          aws ec2 stop-instances \
+            --instance-ids "${{ needs.start-self-hosted-runner.outputs.instance-id }}" \
+            --region "${{ env.SELF_HOSTED_RUNNER_INSTANCE_REGION }}"
+
+  merge-channel-files:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set environment variables
+        run: |
+          # See: https://docs.github.com/actions/using-workflows/workflow-commands-for-github-actions#setting-an-environment-variable
+          echo "CHANNEL_FILES_PATH=${{ runner.temp }}/channel-files" >> "$GITHUB_ENV"
+
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Download channel files artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: ${{ env.CHANNEL_FILES_ARTIFACT }}
+          path: ${{ env.CHANNEL_FILES_PATH }}
+
+      - name: Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install Task
+        uses: arduino/setup-task@v1
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          version: 3.x
+
+      - name: Install dependencies
+        run: yarn
+
+      - name: Merge channel files
+        run: |
+          yarn run merge-channel-files "${{ env.CHANNEL_FILES_PATH }}"
+
+      - name: Upload channel files to job transfer artifact
+        uses: actions/upload-artifact@v3
+        with:
+          if-no-files-found: error
+          name: ${{ env.JOB_TRANSFER_ARTIFACT }}
+          path: ${{ env.CHANNEL_FILES_PATH }}
 
   artifacts:
     name: ${{ matrix.artifact.name }} artifact
@@ -128,9 +430,13 @@ jobs:
           - path: '*Linux_64bit.AppImage'
             name: Linux_X86-64_app_image
           - path: '*macOS_64bit.dmg'
-            name: macOS_dmg
+            name: macOS_X86-64_dmg
           - path: '*macOS_64bit.zip'
-            name: macOS_zip
+            name: macOS_X86-64.zip
+          - path: '*macOS_arm64.dmg'
+            name: macOS_arm64_dmg
+          - path: '*macOS_arm64.zip'
+            name: macOS_arm64_zip
           - path: '*Windows_64bit.exe'
             name: Windows_X86-64_interactive_installer
           - path: '*Windows_64bit.msi'
@@ -198,7 +504,9 @@ jobs:
           path: CHANGELOG.txt
 
   publish:
-    needs: changelog
+    needs:
+      - changelog
+      - merge-channel-files
     if: github.repository == 'arduino/arduino-ide' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
     steps:
@@ -219,7 +527,9 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
   release:
-    needs: changelog
+    needs:
+      - changelog
+      - merge-channel-files
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
@@ -259,6 +569,7 @@ jobs:
     # This job must run after all jobs that use the transfer artifact.
     needs:
       - build
+      - merge-channel-files
       - publish
       - release
       - artifacts

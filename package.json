@@ -24,6 +24,7 @@
     "eslint-plugin-unused-imports": "^1.1.1",
     "husky": "^6.0.0",
     "ignore-styles": "^5.0.1",
+    "js-yaml": "^4.1.0",
     "jsdom": "^11.5.1",
     "lerna": "^6.1.0",
     "lint-staged": "^11.0.0",
@@ -57,7 +58,8 @@
     "i18n:pull": "node ./scripts/i18n/transifex-pull.js ./i18n/",
     "themes:pull": "node ./scripts/themes/theme-tokens-pull.js",
     "themes:generate": "node ./scripts/themes/theme-generator.js",
-    "compose-changelog": "yarn --cwd ./arduino-ide-extension compose-changelog"
+    "compose-changelog": "yarn --cwd ./arduino-ide-extension compose-changelog",
+    "merge-channel-files": "node ./scripts/merge-channel-files.js"
   },
   "lint-staged": {
     "./arduino-ide-extension/**/*.{ts,tsx}": [
