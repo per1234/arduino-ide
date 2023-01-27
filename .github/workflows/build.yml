@@ -244,16 +244,16 @@ jobs:
           file_glob: true
           body: ${{ needs.changelog.outputs.BODY }}
 
-      - name: Publish Release [S3]
-        if: github.repository == 'arduino/arduino-ide'
-        uses: docker://plugins/s3
-        env:
-          PLUGIN_SOURCE: '${{ env.JOB_TRANSFER_ARTIFACT }}/*'
-          PLUGIN_STRIP_PREFIX: '${{ env.JOB_TRANSFER_ARTIFACT }}/'
-          PLUGIN_TARGET: '/arduino-ide'
-          PLUGIN_BUCKET: ${{ secrets.DOWNLOADS_BUCKET }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      # - name: Publish Release [S3]
+      #   if: github.repository == 'arduino/arduino-ide'
+      #   uses: docker://plugins/s3
+      #   env:
+      #     PLUGIN_SOURCE: '${{ env.JOB_TRANSFER_ARTIFACT }}/*'
+      #     PLUGIN_STRIP_PREFIX: '${{ env.JOB_TRANSFER_ARTIFACT }}/'
+      #     PLUGIN_TARGET: '/arduino-ide'
+      #     PLUGIN_BUCKET: ${{ secrets.DOWNLOADS_BUCKET }}
+      #     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      #     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
   clean:
     # This job must run after all jobs that use the transfer artifact.
