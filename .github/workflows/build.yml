@@ -60,13 +60,6 @@ env:
       {
         "name": "Linux",
         "runs-on": "ubuntu-18.04"
-      },
-      {
-        "name": "macOS x86",
-        "runs-on": "macos-latest",
-        "certificate-secret": "APPLE_SIGNING_CERTIFICATE_P12",
-        "certificate-password-secret": "KEYCHAIN_PASSWORD",
-        "certificate-extension": "p12"
       }
     ]
   SELF_HOSTED_MATRIX: |
@@ -354,10 +347,10 @@ jobs:
             name: Linux_X86-64_zip
           - path: '*Linux_64bit.AppImage'
             name: Linux_X86-64_app_image
-          - path: '*macOS_64bit.dmg'
-            name: macOS_X86-64_dmg
-          - path: '*macOS_64bit.zip'
-            name: macOS_X86-64.zip
+          # - path: '*macOS_64bit.dmg'
+          #   name: macOS_X86-64_dmg
+          # - path: '*macOS_64bit.zip'
+          #   name: macOS_X86-64.zip
           - path: '*macOS_ARM64.dmg'
             name: macOS_ARM64_dmg
           - path: '*macOS_ARM64.zip'
