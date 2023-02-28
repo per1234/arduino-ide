@@ -329,6 +329,7 @@ jobs:
       - name: Upload channel file artifact
         uses: actions/upload-artifact@v3
         with:
+          if-no-files-found: error
           name: ${{ env.CHANNEL_FILES_ARTIFACT }}
           path: ${{ env.ARTIFACTS_PATH }}/*.yml
 
@@ -336,7 +337,7 @@ jobs:
       - name: Remove channel file
         shell: bash
         run: |
-          rm "${{ env.ARTIFACTS_PATH }}/*.yml"
+          rm "${{ env.ARTIFACTS_PATH }}"/*.yml
 
       - name: Upload [GitHub Actions]
         uses: actions/upload-artifact@v3
@@ -411,6 +412,7 @@ jobs:
       - name: Upload channel files to job transfer artifact
         uses: actions/upload-artifact@v3
         with:
+          if-no-files-found: error
           name: ${{ env.JOB_TRANSFER_ARTIFACT }}
           path: ${{ env.CHANNEL_FILES_PATH }}
 
