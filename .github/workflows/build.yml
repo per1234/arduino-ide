@@ -385,7 +385,7 @@ jobs:
           name: ${{ env.CHANNEL_FILES_ARTIFACT }}
           path: ${{ env.CHANNEL_FILES_PATH }}
 
-      - name: Install Node.js 16.x
+      - name: Install Node.js
         uses: actions/setup-node@v3
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -396,7 +396,7 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: Install Taskfile
+      - name: Install Task
         uses: arduino/setup-task@v1
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -433,10 +433,10 @@ jobs:
             name: macOS_X86-64_dmg
           - path: '*macOS_64bit.zip'
             name: macOS_X86-64.zip
-          - path: '*macOS_ARM64.dmg'
-            name: macOS_ARM64_dmg
-          - path: '*macOS_ARM64.zip'
-            name: macOS_ARM64_zip
+          - path: '*macOS_arm64.dmg'
+            name: macOS_arm64_dmg
+          - path: '*macOS_arm64.zip'
+            name: macOS_arm64_zip
           - path: '*Windows_64bit.exe'
             name: Windows_X86-64_interactive_installer
           - path: '*Windows_64bit.msi'
