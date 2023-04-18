@@ -245,6 +245,12 @@ jobs:
           file_glob: true
           body: ${{ needs.changelog.outputs.BODY }}
 
+      # This is a temporary measure to prevent release update offers before the manually produced builds are uploaded.
+      # The step must be removed once we are back to fully automated builds.
+      - name: Remove "channel update info files"
+        run: |
+          rm "${{ env.JOB_TRANSFER_ARTIFACT }}"/*.yml
+
       - name: Publish Release [S3]
         if: github.repository == 'arduino/arduino-ide'
         uses: docker://plugins/s3
