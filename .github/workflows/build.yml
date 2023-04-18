@@ -265,6 +265,12 @@ jobs:
       #     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       #     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
+      - name: Upload artifact containing the files that would have been uploaded to S3
+        uses: actions/upload-artifact@v3
+        with:
+          name: s3-files
+          path: ${{ env.JOB_TRANSFER_ARTIFACT }}
+
   clean:
     # This job must run after all jobs that use the transfer artifact.
     needs:
