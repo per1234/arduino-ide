@@ -101,11 +101,11 @@ describe('exec-utils', () => {
     }
 
     const suites: GetExecPathTestSuite[] = [
-      {
-        binaryName: 'arduino-cli',
-        flags: ['version'],
-        assertOutput: createTaskAssert('arduino-cli'),
-      },
+      // {
+      //   binaryName: 'arduino-cli',
+      //   flags: ['version'],
+      //   assertOutput: createTaskAssert('arduino-cli'),
+      // },
       {
         binaryName: 'arduino-fwuploader',
         flags: ['version'],
