@@ -6375,9 +6375,9 @@ electron-updater@^4.6.5:
     semver "^7.3.5"
 
 electron@^23.2.4:
-  version "23.3.10"
-  resolved "https://registry.yarnpkg.com/electron/-/electron-23.3.10.tgz#f148e0ddeb84c57979530842011ac228851e354b"
-  integrity sha512-PcEQo8letcJYUAP3x+GN4Qf4atS65EVxe3VhKrQUnSI6GA5+K1zrs3ur88iHXD4a3mJaH/491Y4pBTLxFqwXnA==
+  version "23.3.13"
+  resolved "https://registry.yarnpkg.com/electron/-/electron-23.3.13.tgz#bd2ae8eef83d1ed9504410fbe03598176c5f8817"
+  integrity sha512-BaXtHEb+KYKLouUXlUVDa/lj9pj4F5kiE0kwFdJV84Y2EU7euIDgPthfKtchhr5MVHmjtavRMIV/zAwEiSQ9rQ==
   dependencies:
     "@electron/get" "^2.0.0"
     "@types/node" "^16.11.26"
