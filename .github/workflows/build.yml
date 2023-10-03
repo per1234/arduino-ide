@@ -424,8 +424,6 @@ jobs:
         run: |
           # See: https://github.com/arduino/arduino-ide/issues/2018
           rm "${{ env.JOB_TRANSFER_ARTIFACT }}/stable-linux.yml"
-          # See: https://github.com/arduino/arduino-ide/issues/408
-          rm "${{ env.JOB_TRANSFER_ARTIFACT }}/stable-mac.yml"
 
       - name: Publish Release [S3]
         if: github.repository == 'arduino/arduino-ide'
