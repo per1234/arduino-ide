@@ -359,7 +359,9 @@ jobs:
           path: ${{ env.JOB_TRANSFER_ARTIFACT }}/${{ matrix.artifact.path }}
 
   changelog:
-    needs: build
+    needs:
+      - build-type-determination
+      - build
     runs-on: ubuntu-latest
     outputs:
       BODY: ${{ steps.changelog.outputs.BODY }}
@@ -372,7 +374,7 @@ jobs:
       - name: Generate Changelog
         id: changelog
         env:
-          IS_RELEASE: ${{ startsWith(github.ref, 'refs/tags/') }}
+          IS_RELEASE: ${{ needs.build-type-determination.outputs.is-release }}
         run: |
           export LATEST_TAG=$(git describe --abbrev=0)
           export GIT_LOG=$(git log --pretty=" - %s [%h]" $LATEST_TAG..HEAD | sed 's/ *$//g')
@@ -398,7 +400,7 @@ jobs:
           echo "$BODY" > CHANGELOG.txt
 
       - name: Upload Changelog [GitHub Actions]
-        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+        if: needs.build-type-determination.outputs.is-nightly == 'true'
         uses: actions/upload-artifact@v3
         with:
           name: ${{ env.JOB_TRANSFER_ARTIFACT }}
