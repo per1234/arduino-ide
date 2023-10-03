@@ -244,7 +244,7 @@ jobs:
       - name: Stage macOS channel file
         if: runner.os == 'macOS'
         run: |
-          mv "${{ env.BUILD_ARTIFACTS_PATH }}/${{ needs.build-type-determination.outputs.channel-name }}-mac.yml" "${{ env.ARTIFACTS_PATH }}/${{ needs.build-type-determination.outputs.channel-name }}-mac-${{ runner.arch }}.yml"
+          mv "${{ env.BUILD_ARTIFACTS_PATH }}/${{ needs.build-type-determination.outputs.channel-name }}-mac.yml" "${{ env.BUILD_ARTIFACTS_PATH }}/${{ needs.build-type-determination.outputs.channel-name }}-mac-${{ runner.arch }}.yml"
 
       - name: Upload channel file artifact
         uses: actions/upload-artifact@v3
