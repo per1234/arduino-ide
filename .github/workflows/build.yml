@@ -60,8 +60,6 @@ jobs:
 
           echo "result=$RESULT" >> $GITHUB_OUTPUT
 
-  build:
-    name: build (${{ matrix.config.name }})
   build-type-determination:
     needs: run-determination
     if: needs.run-determination.outputs.result == 'true'
@@ -96,8 +94,11 @@ jobs:
           echo "is-release=$is_release" >> $GITHUB_OUTPUT
           echo "is-nightly=$is_nightly" >> $GITHUB_OUTPUT
 
-    needs: run-determination
-    if: needs.run-determination.outputs.result == 'true'
+  build:
+    name: build (${{ matrix.config.name }})
+    needs:
+      - run-determination
+      - build-type-determination
     strategy:
       matrix:
         config:
