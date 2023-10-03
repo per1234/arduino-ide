@@ -121,10 +121,10 @@ jobs:
             is_nightly="false"
             channel_name="stable"
           elif [[
-            "${{ github.event_name }}" == "schedule" || 
+            "${{ github.event_name }}" == "schedule" ||
             (
               "${{ github.event_name }}" == "workflow_dispatch" &&
-              "${{ github.ref }} == "refs/heads/main"
+              "${{ github.ref }}" == "refs/heads/main"
             )
           ]]; then
             is_release="false"
