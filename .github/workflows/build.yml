@@ -96,9 +96,7 @@ jobs:
 
   build:
     name: build (${{ matrix.config.name }})
-    needs:
-      - run-determination
-      - build-type-determination
+    needs: build-type-determination
     strategy:
       matrix:
         config:
