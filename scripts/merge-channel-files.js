@@ -11,19 +11,49 @@ const yaml = require('js-yaml');
 const fs = require('fs');
 const path = require('path');
 
-const args = process.argv.slice(2);
-if (args.length < 1) {
-  console.error('Missing channel files folder path argument.');
+if (process.argv.includes('--help') || process.argv.includes('-h')) {
+  console.log(
+    `Usage:
+merge-channel-files.js [FLAG]...
+
+Flags:
+      --channel <name>     The name of the update channel.
+  -h, --help               Print help for the script
+      --input <path>       The path of the folder that contains the files to merge.
+`
+  );
+  process.exit(0);
+}
+
+const channelFlagIndex = process.argv.indexOf('--channel');
+
+let channel;
+if (channelFlagIndex > -1) {
+  channel = process.argv[channelFlagIndex + 1];
+} else {
+  console.error('Missing required --channel flag');
   process.exit(1);
 }
 
-const [channelFilesFolder] = args;
+const inputFlagIndex = process.argv.indexOf('--input');
+
+let channelFilesFolder;
+if (inputFlagIndex > -1) {
+  channelFilesFolder = process.argv[inputFlagIndex + 1];
+} else {
+  console.error('Missing required --input flag');
+  process.exit(1);
+}
+
 // Staging file filename suffixes are named according to `runner.arch`.
 // https://docs.github.com/en/actions/learn-github-actions/contexts#runner-context
-const x86ChannelFilePath = path.join(channelFilesFolder, 'stable-mac-X64.yml');
+const x86ChannelFilePath = path.join(
+  channelFilesFolder,
+  channel + '-mac-X64.yml'
+);
 const arm64ChannelFilePath = path.join(
   channelFilesFolder,
-  'stable-mac-ARM64.yml'
+  channel + '-mac-ARM64.yml'
 );
 
 const x86Data = yaml.load(
@@ -37,12 +67,10 @@ const mergedData = x86Data;
 mergedData['files'] = mergedData['files'].concat(arm64Data['files']);
 
 fs.writeFileSync(
-  path.join(channelFilesFolder, 'stable-mac.yml'),
+  path.join(channelFilesFolder, channel + '-mac.yml'),
   yaml.dump(mergedData, { lineWidth: -1 })
 );
 
 // Clean up
-if (!process.argv.includes('--no-cleanup')) {
-  fs.rmSync(x86ChannelFilePath);
-  fs.rmSync(arm64ChannelFilePath);
-}
+fs.rmSync(x86ChannelFilePath);
+fs.rmSync(arm64ChannelFilePath);
