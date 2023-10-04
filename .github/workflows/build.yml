@@ -203,14 +203,14 @@ jobs:
             build_matrix="$( \
               echo "${{ env.BASE_BUILD_DATA }}" | \
               yq \
-                -output-format json \
+                --output-format json \
                 '[.[].config]' \
             )"
 
             artifact_matrix="$( \
               echo "${{ env.BASE_BUILD_DATA }}" | \
               yq \
-                -output-format json \
+                --output-format json \
                 '.[].artifacts' \
             )"
 
