@@ -167,7 +167,7 @@ jobs:
           echo "is-release=$is_release" >> $GITHUB_OUTPUT
           echo "is-nightly=$is_nightly" >> $GITHUB_OUTPUT
           echo "channel-name=$channel_name" >> $GITHUB_OUTPUT
-          echo "publish-to-s3=${{ github.repository == 'arduino/arduino-ide' }}" >> $GITHUB_OUTPUT
+          echo "publish-to-s3=${{ secrets.AWS_SECRET_ACCESS_KEY != '' }}" >> $GITHUB_OUTPUT
 
   select-targets:
     needs: build-type-determination
