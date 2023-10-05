@@ -106,17 +106,17 @@ async function getArtifactName(version) {
     }
     case 'darwin': {
       if (arch === 'arm64') {
-        return `${name}_${version}_macOS_arm64.\$\{ext}`;
+        return `${name}_${version}_macOS_ARM64.\$\{ext}`;
       }
       return `${name}_${version}_macOS_64bit.\$\{ext}`;
     }
     case 'linux': {
       switch (arch) {
         case 'arm': {
-          return `${name}_${version}_Linux_armv7.\$\{ext}`;
+          return `${name}_${version}_Linux_ARMv7.\$\{ext}`;
         }
         case 'arm64': {
-          return `${name}_${version}_Linux_arm64.\$\{ext}`;
+          return `${name}_${version}_Linux_ARM64.\$\{ext}`;
         }
         case 'x64': {
           return `${name}_${version}_Linux_64bit.\$\{ext}`;

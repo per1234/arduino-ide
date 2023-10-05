@@ -98,10 +98,10 @@ env:
         certificate-extension: p12
         mergeable-channel-file: 'true'
       artifacts:
-        - path: '*macOS_arm64.dmg'
-          name: macOS_arm64_dmg
-        - path: '*macOS_arm64.zip'
-          name: macOS_arm64_zip
+        - path: '*macOS_ARM64.dmg'
+          name: macOS_ARM64_dmg
+        - path: '*macOS_ARM64.zip'
+          name: macOS_ARM64_zip
 
 jobs:
   run-determination:
