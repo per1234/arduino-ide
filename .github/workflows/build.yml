@@ -76,7 +76,6 @@ env:
         # otherwise paths in the build job will be too long for `light.exe`
         # we use the below as a Symbolic link (just changing the wd will break the checkout action)
         # this is a work around (see: https://github.com/actions/checkout/issues/197).
-        working-directory: 'C:\a'
       artifacts:
         - path: '*Windows_64bit.exe'
           name: Windows_X86-64_interactive_installer
