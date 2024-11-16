@@ -323,6 +323,12 @@ jobs:
         if: fromJSON(matrix.config.container) != null
         uses: actions/checkout@v3
 
+      - name: Free up disk space
+        if: runner.os == 'macOS'
+        run: |
+          # Xcode is not needed and is very large so deleting it is an easy way to free up space.
+          sudo rm -rf /Applications/Xcode*.app
+
       - name: Install Node.js
         if: fromJSON(matrix.config.container) == null && runner.name != 'WINDOWS-SIGN-PC'
         uses: actions/setup-node@v4
