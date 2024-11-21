@@ -647,6 +647,9 @@ jobs:
           path: ${{ env.ARTIFACTS_FOLDER }}
           pattern: ${{ env.JOB_TRANSFER_ARTIFACT_PREFIX }}*
 
+      - run: |
+          ls -lAR "${{ env.ARTIFACTS_FOLDER }}"
+
       - name: Get Tag
         id: tag_name
         run: |
