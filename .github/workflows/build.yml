@@ -462,6 +462,7 @@ jobs:
       - name: Download staged-for-merge channel file artifacts
         uses: actions/download-artifact@v4
         with:
+          merge-multiple: true
           path: ${{ env.CHANNEL_FILES_PATH }}
           pattern: ${{ env.STAGED_CHANNEL_FILE_ARTIFACT_PREFIX }}*
 
@@ -605,6 +606,7 @@ jobs:
       - name: Download all job transfer artifacts
         uses: actions/download-artifact@v4
         with:
+          merge-multiple: true
           path: ${{ env.ARTIFACTS_FOLDER }}
           pattern: ${{ env.JOB_TRANSFER_ARTIFACT_PREFIX }}*
 
@@ -641,6 +643,7 @@ jobs:
       - name: Download all job transfer artifacts
         uses: actions/download-artifact@v4
         with:
+          merge-multiple: true
           path: ${{ env.ARTIFACTS_FOLDER }}
           pattern: ${{ env.JOB_TRANSFER_ARTIFACT_PREFIX }}*
 
