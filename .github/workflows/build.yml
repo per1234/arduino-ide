@@ -623,7 +623,7 @@ jobs:
           path: ${{ env.JOB_TRANSFER_ARTIFACT }}
 
       - run: |
-          ls -lAR "${{ env.ARTIFACTS_FOLDER }}"
+          ls -lAR "${{ env.JOB_TRANSFER_ARTIFACT }}"
 
       - name: Get Tag
         id: tag_name
