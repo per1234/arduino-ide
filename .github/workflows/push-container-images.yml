@@ -22,7 +22,7 @@ jobs:
     if: >
       (
         github.event_name != 'pull_request' &&
-        github.repository == 'arduino/arduino-ide'
+        github.repository == 'per1234/arduino-ide'
       ) ||
       (
         github.event_name == 'pull_request' &&
@@ -66,5 +66,5 @@ jobs:
           labels: ${{ steps.metadata.outputs.labels }}
           # Workflow is triggered on relevant events for the sake of a "dry run" validation but image is only pushed to
           # registry on commit to the main branch.
-          push: ${{ github.ref == 'refs/heads/main' }}
+          push: true
           tags: ${{ steps.metadata.outputs.tags }}
