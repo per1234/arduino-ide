@@ -595,6 +595,9 @@ jobs:
           path: ${{ env.ARTIFACTS_FOLDER }}
           pattern: ${{ env.JOB_TRANSFER_ARTIFACT_PREFIX }}*
 
+      - run: |
+          ls -lAR "${{ env.ARTIFACTS_FOLDER }}"
+
       - name: Publish Nightly [S3]
         uses: docker://plugins/s3
         env:
