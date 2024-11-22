@@ -567,6 +567,13 @@ jobs:
           name: ${{ env.JOB_TRANSFER_ARTIFACT_PREFIX }}changelog
           path: CHANGELOG.txt
 
+      - name: Upload changelog artifact
+        if: needs.build-type-determination.outputs.is-nightly == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: changelog
+          path: CHANGELOG.txt
+
   publish:
     needs:
       - build-type-determination
