@@ -91,7 +91,7 @@ env:
         runs-on: ubuntu-latest
         container: |
           {
-            \"image\": \"ghcr.io/arduino/arduino-ide/linux:main\"
+            \"image\": \"ghcr.io/per1234/arduino-ide/linux:test-dependabot-github_actions-actions-upload-artifact-4\"
           }
         job-transfer-artifact-suffix: Linux_64bit
         mergeable-channel-file: 'false'
