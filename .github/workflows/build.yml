@@ -320,14 +320,6 @@ jobs:
     timeout-minutes: 90
 
     steps:
-      - name: Install Chromium dependency
-        if: >
-          runner.os == 'Linux' &&
-          runner.arch == 'ARM64'
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes chromium-browser
-
       - name: Symlink custom working directory
         shell: cmd
         if: runner.os == 'Windows' && matrix.config.working-directory
@@ -374,6 +366,19 @@ jobs:
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           version: 3.x
+
+      - name: Install Linux dependencies
+        if: >
+          runner.os == 'Linux' &&
+          runner.arch == 'ARM64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install \
+            --yes \
+            chromium-browser \
+            libsecret-1-dev \
+            libx11-dev \
+            libxkbfile-dev
 
       - name: Package
         env:
